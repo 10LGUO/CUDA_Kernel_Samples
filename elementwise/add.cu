@@ -1,3 +1,38 @@
+/*
+ * elementwise_add_float4
+ *
+ * Computes c[i] = a[i] + b[i] for all i in [0, N) using vectorized float4 access.
+ *
+ * Each thread handles 4 consecutive floats via a single 128-bit LDG.128 load
+ * instruction (float4), reducing memory transactions 4x compared to scalar access.
+ * This is a bandwidth-bound kernel — the bottleneck is HBM throughput, not compute.
+ *
+ * Thread mapping:
+ *   thread t → elements [4t, 4t+1, 4t+2, 4t+3]
+ *   idx = (blockDim.x * blockIdx.x + threadIdx.x) * 4
+ *
+ * Grid/block sizing:
+ *   block_size = 1024 threads
+ *   grid_size  = CEIL(CEIL(N, 4), block_size)  // enough blocks to cover all elements
+ *
+ * Threads with idx >= N exit immediately (out-of-bounds guard for non-multiple-of-4 N).
+ *
+ * Scalar vs float4 comparison:
+ *
+ *   Without vectorization (1 float per thread):
+ *     int idx = blockDim.x * blockIdx.x + threadIdx.x;
+ *     c[idx] = a[idx] + b[idx];
+ *     thread 0 → element 0, thread 1 → element 1, thread N → element N
+ *
+ *   With float4 vectorization (4 floats per thread):
+ *     int idx = (blockDim.x * blockIdx.x + threadIdx.x) * 4;
+ *     float4 tmp = FLOAT4(a[idx]);  // one 128-bit LDG.128 load
+ *     thread 0 → elements [0,1,2,3], thread 1 → [4,5,6,7], thread N → [4N..4N+3]
+ *
+ *   float4 requires 4x fewer threads and 4x fewer memory instructions for the same N.
+ */
+
+
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +79,7 @@ int main() {
     cudaCheck(cudaMalloc((void**)&a_d, N * sizeof(float)));
     cudaCheck(cudaMalloc((void**)&b_d, N * sizeof(float)));
     cudaCheck(cudaMalloc((void**)&c_d, N * sizeof(float)));
+    // Copy data from host to device crossing PCIe bus.
     cudaCheck(cudaMemcpy(a_d, a_h, N * sizeof(float), cudaMemcpyHostToDevice));
     cudaCheck(cudaMemcpy(b_d, b_h, N * sizeof(float), cudaMemcpyHostToDevice));
 
