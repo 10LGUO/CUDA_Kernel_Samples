@@ -2,6 +2,10 @@
 
 template<const int BLOCK_SIZE>
 __global__ void sgemm_v2(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
+    // BM = rows of C this block owns (block tile height)
+    // BN = cols of C this block owns (block tile width)
+    // BK = K-dimension step per iteration (how many cols of A / rows of B loaded per loop)
+    // Grid is sized (CEIL(N,BN), CEIL(M,BM)) — one block per BM×BN patch of C.
     const int BM = BLOCK_SIZE;
     const int BN = BLOCK_SIZE;
     const int BK = BLOCK_SIZE;

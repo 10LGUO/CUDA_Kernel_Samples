@@ -1,5 +1,16 @@
 #include "kernel3.cuh"
 
+// BM = rows of C this block owns (block tile height)
+// BN = cols of C this block owns (block tile width)
+// BK = K-dimension step per loop iteration
+// TM = rows of C each thread owns (thread tile height)
+//
+// Grid: (CEIL(N,BN), CEIL(M,BM)) — one block per BM×BN patch of C
+// Block: BM*BN/TM threads — fewer threads than elements because each thread handles TM rows
+//
+// Ownership hierarchy:
+//   Block  → BM×BN patch of C
+//   Thread → TM×1  column within the block's patch (1 col, TM rows)
 template<const int BM,
          const int BN,
          const int BK,
@@ -7,7 +18,9 @@ template<const int BM,
 __global__ void sgemm_v3(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
     int bx = blockIdx.x;
     int by = blockIdx.y;
-    int thread_num = BM * BN / TM; // thread_num是一个block中线程的数量，TM表示一个线程负责计算TM个元素
+    // thread_num: threads per block. Each thread computes TM output elements,
+    // so BM*BN total elements / TM elements per thread = BM*BN/TM threads needed.
+    int thread_num = BM * BN / TM;
 
     int tx = threadIdx.x % BN;
     int ty = threadIdx.x / BN * TM;
