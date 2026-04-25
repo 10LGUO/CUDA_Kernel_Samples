@@ -28,7 +28,26 @@ __global__ void sgemm_v3(int M, int N, int K, float alpha, float *A, float *B, f
     __shared__ float As[BM * BK];
     __shared__ float Bs[BK * BN];
 
-    // 移动到当前block
+    // Move each pointer to the top-left corner of this block's tile.
+    // All three matrices are row-major, so element [row][col] = base[row * row_stride + col].
+    //
+    // A (M×K, row stride=K):
+    //   This block owns rows by*BM .. by*BM+BM-1, and ALL K columns (full K needed for dot product).
+    //   → start at row by*BM, col 0  →  A[by*BM * K]
+    //   bx does not appear: A is partitioned by row (by), not by column.
+    //
+    // B (K×N, row stride=N):
+    //   This block owns cols bx*BN .. bx*BN+BN-1, and ALL K rows (full K needed for dot product).
+    //   → start at row 0, col bx*BN  →  B[0*N + bx*BN] = B[bx*BN]
+    //   by does not appear: ALL blocks share the same K rows of B — by only determines
+    //   which rows of A and C are used, never which rows of B. Starting B at a non-zero
+    //   row would skip part of K and produce a wrong (partial) dot product.
+    //   The K loop advances B downward (B += BK*N) through all K rows.
+    //
+    // C (M×N, row stride=N):
+    //   This block owns the BM×BN patch at row by*BM, col bx*BN.
+    //   K does not appear: K is the reduction dimension, summed away — C has no K axis.
+    //   → C[by*BM * N + bx*BN]
     A = &A[by * BM * K];
     B = &B[bx * BN];
     C = &C[by * BM * N + bx * BN];
