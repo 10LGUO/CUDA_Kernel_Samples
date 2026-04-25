@@ -16,8 +16,10 @@ template<const int BM,
          const int BK,
          const int TM>
 __global__ void sgemm_v3(int M, int N, int K, float alpha, float *A, float *B, float beta, float *C) {
-    int bx = blockIdx.x;
-    int by = blockIdx.y;
+    int bx = blockIdx.x;  // which block-column: selects cols bx*BN..bx*BN+BN-1 of C (and B)
+    int by = blockIdx.y;  // which block-row:    selects rows by*BM..by*BM+BM-1 of C (and A)
+                          // grid.x = CEIL(N,BN), grid.y = CEIL(M,BM) — one block per BM×BN patch of C
+                          // row coverage of A is split across grid.y blocks; K loop covers the col axis
     // thread_num: threads per block. Each thread computes TM output elements,
     // so BM*BN total elements / TM elements per thread = BM*BN/TM threads needed.
     int thread_num = BM * BN / TM;
