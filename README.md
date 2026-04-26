@@ -643,8 +643,19 @@ __global__ void sgemm(float* A, float* B, float* C, int M, int N, int K) {
     __shared__ float As[BM * BK];
     __shared__ float Bs[BK * BN];
 
+    // Pointer init: move each pointer to the top-left of this block's tile.
+    // Row-major: element [row][col] = base[row * row_stride + col]
+    //
+    // A (M×K, row stride=K): row partition only, col starts at 0 (all K cols needed)
+    //   A[by*BM][0] = A[by*BM * K + 0] = A[by*BM * K]
     A = &A[by * BM * K];
+    //
+    // B (K×N, row stride=N): col partition only, row starts at 0 (all K rows needed)
+    //   B[0][bx*BN] = B[0 * N + bx*BN] = B[bx*BN]
     B = &B[bx * BN];
+    //
+    // C (M×N, row stride=N): both row and col partition, K does not appear (summed away)
+    //   C[by*BM][bx*BN] = C[by*BM * N + bx*BN]
     C = &C[by * BM * N + bx * BN];
 
     int a_tile_row = threadIdx.x / BK;

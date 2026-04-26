@@ -37,28 +37,23 @@ __global__ void sgemm_v3(int M, int N, int K, float alpha, float *A, float *B, f
     __shared__ float As[BM * BK];
     __shared__ float Bs[BK * BN];
 
-    // Move each pointer to the top-left corner of this block's tile.
-    // All three matrices are row-major, so element [row][col] = base[row * row_stride + col].
+    // Pointer init: move each pointer to the top-left of this block's tile.
+    // Row-major: element [row][col] = base[row * row_stride + col]
     //
-    // A (M×K, row stride=K):
-    //   This block owns rows by*BM .. by*BM+BM-1, and ALL K columns (full K needed for dot product).
-    //   → start at row by*BM, col 0  →  A[by*BM * K]
-    //   bx does not appear: A is partitioned by row (by), not by column.
-    //
-    // B (K×N, row stride=N):
-    //   This block owns cols bx*BN .. bx*BN+BN-1, and ALL K rows (full K needed for dot product).
-    //   → start at row 0, col bx*BN  →  B[0*N + bx*BN] = B[bx*BN]
-    //   by does not appear: ALL blocks share the same K rows of B — by only determines
-    //   which rows of A and C are used, never which rows of B. Starting B at a non-zero
-    //   row would skip part of K and produce a wrong (partial) dot product.
-    //   The K loop advances B downward (B += BK*N) through all K rows.
-    //
-    // C (M×N, row stride=N):
-    //   This block owns the BM×BN patch at row by*BM, col bx*BN.
-    //   K does not appear: K is the reduction dimension, summed away — C has no K axis.
-    //   → C[by*BM * N + bx*BN]
+    // A (M×K, row stride=K): row partition only, col starts at 0 (all K cols needed)
+    //   A[by*BM][0] = A[by*BM * K + 0] = A[by*BM * K]
+    //   bx absent: A is not partitioned by column.
     A = &A[by * BM * K];
+    //
+    // B (K×N, row stride=N): col partition only, row starts at 0 (all K rows needed)
+    //   B[0][bx*BN] = B[0 * N + bx*BN] = B[bx*BN]
+    //   by absent: all blocks need the same K rows of B — starting at non-zero row
+    //   would skip part of K and produce a wrong dot product.
+    //   K loop advances B downward (B += BK*N) through all K rows.
     B = &B[bx * BN];
+    //
+    // C (M×N, row stride=N): both row and col partition, K absent (summed away, no K axis in C)
+    //   C[by*BM][bx*BN] = C[by*BM * N + bx*BN]
     C = &C[by * BM * N + bx * BN];
 
     // 当前线程负责搬运全局内存矩阵A的中第a_tile_row行，第a_tile_col列元素至共享内存第a_tile_row行，第a_tile_col列
