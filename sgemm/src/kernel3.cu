@@ -20,8 +20,15 @@ __global__ void sgemm_v3(int M, int N, int K, float alpha, float *A, float *B, f
     int by = blockIdx.y;  // which block-row:    selects rows by*BM..by*BM+BM-1 of C (and A)
                           // grid.x = CEIL(N,BN), grid.y = CEIL(M,BM) — one block per BM×BN patch of C
                           // row coverage of A is split across grid.y blocks; K loop covers the col axis
-    // thread_num: threads per block. Each thread computes TM output elements,
-    // so BM*BN total elements / TM elements per thread = BM*BN/TM threads needed.
+    // thread_num: threads per block.
+    // Each thread owns a TM×1 sub-tile (TM rows, 1 col) — this is a 1D thread tile.
+    // Total output elements in the block tile = BM*BN.
+    // Threads needed = BM*BN / TM.
+    //
+    // Note: this is NOT BM*BK. BK is the K-loop step (shared memory fit), independent of BN.
+    // BM*BK threads would only accidentally equal BM*BN/TM for specific parameter values.
+    // The thread count is always determined by the output tile (BM×BN) and per-thread work (TM),
+    // not by the shared memory tile size.
     int thread_num = BM * BN / TM;
 
     int tx = threadIdx.x % BN;

@@ -1,26 +1,32 @@
 # CUDA_Kernel_Samples
+
 ## 引言
+
 本项目是 CUDA **算子手撕与面试指南**：
+
 1. 汇总了面试高频的 CUDA 算子题目和优化策略，包含面试高频算子的编写示例
 2. 项目从算子 naive 实现到优化版本均包含完整代码，便于调试与性能分析
 3. 每个算子附有相关的 GPU 知识点，帮助求职者高效备战 CUDA 编程面试
 
 目前覆盖以下 CUDA 常见算子及其优化版本：
 
-|     文件夹     |    描述    |                内容                 | 考察频率 |
-| :---------: | :------: | :-------------------------------: | :--: |
-|   example   | 一些简单的例子  |                 /                 |  /   |
-| elementwise | 数组对应元素计算 |                add                |  低   |
-|    gemv     |  矩阵乘向量   |               sgemv               |  低   |
-|   reduce    |  归约计算优化  | sum, max, softmax, softmax_matrix |  高   |
-|    sgemm    |  矩阵乘优化   | naive, blocktile, threadtile, ... |  中   |
-|  transpose  |  矩阵转置优化  |    naive, 优化访存并解决bank conflict    |  中   |
+
+| 文件夹         | 描述       | 内容                                | 考察频率 |
+| ----------- | -------- | --------------------------------- | ---- |
+| example     | 一些简单的例子  | /                                 | /    |
+| elementwise | 数组对应元素计算 | add                               | 低    |
+| gemv        | 矩阵乘向量    | sgemv                             | 低    |
+| reduce      | 归约计算优化   | sum, max, softmax, softmax_matrix | 高    |
+| sgemm       | 矩阵乘优化    | naive, blocktile, threadtile, ... | 中    |
+| transpose   | 矩阵转置优化   | naive, 优化访存并解决bank conflict       | 中    |
 
 
 ## 算子手撕说明
+
 面试时不会提供 CUDA 运行环境，也不会要求完整写出可以运行的代码，通常只需要写出 CUDA 算子函数（大部分情况只需要写这个），block_size，grid_size 和函数调用。
 
 在此列出一些宏，后面会用到：
+
 ```cpp
 // 1. 向上取整
 #define CEIL(a, b) ((a + b - 1) / (b))
@@ -36,11 +42,13 @@
 **本文剩余篇幅从这一角度出发，展示必要的代码，以供参考和练习。**
 
 # elementwise
-**考察频率**：<span style="color: blue; font-weight: bold;">低</span>
+
+**考察频率**：**低**
 
 **算子描述**：elementwise 是最简单的**一类算子**，其指的是对数据进行逐元素操作，例如将两个等长的数组对应元素相加（[add](./elementwise/add.cu)）。另外在深度学习中，激活函数会对输入数据的每个元素求对应激活值，故激活函数也算在 elementwise 范围内。
 
 算子主要分两种写法：
+
 1. naive：每个线程负责一个元素的运算
 2. 使用**float4**等向量化访存方式：只对大规模数据有加速效果，需要注意，**要在 grid 上除以 4**，而不是在 block 上除以 4，否则可能会降低SM的占用率(Occupancy，实际运行的线程数 / SM 理论最大线程数)，可以参考👉[grid_size 和 block_size 选择](https://blog.csdn.net/LostUnravel/article/details/135721041)（block_size 不小于SM上最大支持的线程数/最大同时执行的block数量，且得是SM上最大支持的线程数的约数，才有可能达到100% Occupancy），向量化存取的好处在于可以减少访存指令的数量，单位时间内读取的数据量变多，增大访存带宽。
 
@@ -51,6 +59,7 @@
 源码：[./elementwise/add.cu](./elementwise/add.cu)
 
 ### naive版
+
 ```cpp
 // block_size，grid_size 和函数调用
 int block_size = 1024;
@@ -67,6 +76,7 @@ __global__ void elementwise_add(float* a, float* b, float *c, int N) {
 ```
 
 ### 使用向量化访存
+
 使用向量化访存进行优化，需要注意，**要在 grid 上除以 4**：
 
 ```cpp
@@ -143,7 +153,8 @@ __global__ void relu_float4(float* x, float* y, int N) {
 ```
 
 # reduce
-**考察频率**：<span style="color: red; font-weight: bold;">高</span>
+
+**考察频率**：**高**
 
 **算子描述**：reduce 是一种聚合操作，通常用于将一个多元素的数据结构（如数组或张量）通过某种规则归约为一个更小的数据结构（通常是单个值或更小的数组）。它广泛应用于数据处理、并行计算以及深度学习中。例如对数组进行求和 (sum)，求均值 (mean)，求最大值 (max)，还有求 softmax。其中，**sum 和 softmax 的考察频率最高**。
 
@@ -249,6 +260,7 @@ __global__ void reduce_v3(float* d_x, float* d_y, const int N) {
 ```
 
 ### warp shuffle + float4
+
 在 warp shuffle 上进一步优化，搬运数据时使用 float4：
 
 ```cpp
@@ -310,6 +322,7 @@ $$
 其中 $M$ 是输入向量的最大值。
 
 ### CPU 写法
+
 ```cpp
 void softmax(float* input, float* output, int N) {
     int M = *(std::max_element(input, input + N));
@@ -328,9 +341,10 @@ void softmax(float* input, float* output, int N) {
 
 最直接的思路是将 Softmax 计算过程拆分为多个归约算子，只要会写归约，那么 Softmax 就能写。
 
-这种写法的优点是比较简单，虽然代码比较多，但基本都是采用归约的写法，几个算子的逻辑上差异不大。缺点是算子效率比较低。**这里建议学习 [softmax_matrix](#softmax_matrix) 的写法！**
+这种写法的优点是比较简单，虽然代码比较多，但基本都是采用归约的写法，几个算子的逻辑上差异不大。缺点是算子效率比较低。**这里建议学习 [softmax_matrix](#softmax_matxrix) 的写法！**
 
 思路：
+
 - 核函数1：归约求最值 max_val
 - 核函数2：归约求和 sum
 - 核函数3：计算每个元素减去 max_val 除以 sum。
@@ -409,17 +423,20 @@ softmax_kernel<<<gird_size, block_size>>>(input, output, sum, max_val, N);
 ```
 
 # transpose
-**考察频率**：<span style="color: red; font-weight: bold;">中</span>
+
+**考察频率**：**中**
 
 **算子描述**：指的是矩阵转置，其中会涉及到 GPU 全局内存的高效访问、bank conflict 知识点。
 
 如何优化全局内存的访问：
+
 1. **尽量合并访问**，即连续的线程读取连续的内存，且尽量让访问的全局内存的首地址是32字节（一次数据传输处理的数据量）的倍数（cudaMalloc分配的至少是256字节整数倍）；
 2. 如果不能同时合并读取和写入，则应该**尽量做到合并写入**，因为编译器如果能判断一个全局内存变量在核函数内是只可读的，会自动调用 `__ldg()` 读取全局内存，从而对数据进行缓存，缓解非合并访问带来的影响，但这只对读取有效，写入则没有类似的函数。另外，对于开普勒架构和麦克斯韦架构，需要显式的使用 `__ldg()` 函数，例如 `B[ny * N + nx] = __ldg(&A[nx * N + ny])`。
 
 **源码文件夹**：[./transpose](./transpose)
 
 ## naive
+
 ```cpp
 __global__ void transpose(float* input, float* output, int M, int N) {
     // input的row和col
@@ -433,6 +450,7 @@ __global__ void transpose(float* input, float* output, int M, int N) {
 ```
 
 ## 仅合并写入
+
 ```cpp
 __global__ void transpose(float* input, float* output, int M, int N) {
     // output的row和col
@@ -446,11 +464,13 @@ __global__ void transpose(float* input, float* output, int M, int N) {
 ```
 
 ## （推荐）使用共享内存中转，同时合并读取和写入
-![shareMem](./transpose/assets/sharedMem.png)
+
+shareMem
 
 需要注意的是，这种方式在读共享内存数据时会遇到经典的 bank conflict 问题，可通过 padding 或者 swizzling 的方式解决：
 
 对共享内存做padding：
+
 ```cpp
 // 输入矩阵是M行N列，输出矩阵是N行M列
 dim3 block(32, 32);
@@ -479,6 +499,7 @@ __global__ void transpose(float* input, float* output, int M, int N) {
 ```
 
 使用 swizzling，不需要对共享内存做 padding：
+
 ```cpp
 // 输入矩阵是M行N列，输出矩阵是N行M列
 dim3 block(32, 32);
@@ -507,13 +528,15 @@ __global__ void transpose(float* input, float* output, int M, int N) {
 ```
 
 # sgemm
-**考察频率**：<span style="color: red; font-weight: bold;">中</span>
+
+**考察频率**：**中**
 
 **算子描述**：指的是矩阵乘。矩阵乘是 CUDA 学习时的经典案例，涉及多种 CUDA 编程中的常用优化技巧。建议阅读 [./sgemm/README.md](./sgemm/README.md)。但手撕时难度往往较大，建议优先掌握最简单的 naive 版本以及 block_tile 版本。掌握 block_tile 版本后，只需要加一些代码就可以优化为 thread_tile 版本，故也可以考虑掌握。其余的更高效的优化版本，个人认为了解其原理即可，不必强求面试时手写。
 
 **源码文件夹**：[./sgemm](./sgemm)
 
 ## naive 版
+
 ```cpp
 // C(MxN) = A(MxK) * B(KxN) 行优先
 // 每个线程处理一个输出矩阵中的元素
@@ -537,7 +560,9 @@ __global__ void sgemm(float* A, float* B, float* C, int M, int N, int K) {
     C[row * N + col] = accum;
 }
 ```
+
 ## block_tile 版本
+
 还是一个线程计算一个输出矩阵中的元素，但是用 shared mem 做缓存，重复从 shared mem 中读取，而不是从 global mem，虽然读取次数没变少，但是 shared mem 比 global mem 读取速度快：
 
 ```cpp
@@ -604,9 +629,13 @@ __global__ void sgemm(float* A, float* B, float* C, int M, int N, int K) {
     int bx = blockIdx.x;
     int by = blockIdy.y;
 
-    int block_row_thread = BN / TN;  // block中一行的thread数量
-    int block_col_thread = BM / TM;  // block中一列的thread数量
-    int thread_num = block_row_thread * block_col_thread;  // block中thread总量
+    int block_row_thread = BN / TN;  // threads across one row of the block tile
+    int block_col_thread = BM / TM;  // threads down one col of the block tile
+    // thread_num is determined by the OUTPUT tile (BM×BN) and per-thread work (TM×TN),
+    // NOT by the shared memory tile (BM×BK). BK is the K-loop step, independent of BN.
+    // kernel3 (1D tile, TN=1): thread_num = BM*BN/TM
+    // kernel4 (2D tile):       thread_num = BM*BN/(TM*TN)  ← fewer threads, more work per thread
+    int thread_num = block_row_thread * block_col_thread;
 
     int tx = (threadIdx.x % block_row_thread) * TN;  // threadtile左上角x坐标
     int ty = (threadIdx.x / block_row_thread) * TM;  // threadtile左上角y坐标
@@ -657,13 +686,15 @@ __global__ void sgemm(float* A, float* B, float* C, int M, int N, int K) {
 ```
 
 # gemv
-**考察频率**：<span style="color: blue; font-weight: bold;">低</span>
+
+**考察频率**：**低**
 
 **算子描述**：求一个矩阵乘以一个向量，方法是每个block中有一个warp，每个warp负责一行的计算。虽然面试考察频率不大但，推荐学习并了解。因为 gemv 中使用一个 warp 负责一行的计算方式，可以拓展到对一个矩阵按行求归约（**面试时有概率会考察二维矩阵的按行求归约，而不只是一维数组**）
 
 **源码文件夹**：[./gemv](./gemv)
 
 ## gemv
+
 ```cpp
 // 行数: M = 1024
 // 列数: K = 32
@@ -700,6 +731,7 @@ __global__ void sgemv(float* A, float* x, float* y, int M, int K) {
 源码：[./reduce/softmax_matrix/softmax_matrix.cu](./reduce/softmax_matrix/softmax_matrix.cu)
 
 对一个 MxN 的矩阵，每一行求 softmax，思路同样是每个 warp 处理一行，用这个 warp 对一行进行求和、求最值，计算结果存入共享内存，然后每个元素求 softmax：
+
 ```cpp
 __global__ void softmax_kernel(float* input, float* output, int M, int N) {
     __shared__ float s_max_val;
@@ -742,6 +774,7 @@ __global__ void softmax_kernel(float* input, float* output, int M, int N) {
 ```
 
 改用 `__shfl_xor_sync` 后，每个线程的寄存器的 `max_val` 和 `sum` 都是最终的结果，就不用写到共享内存再读取了：
+
 ```cpp
 dim3 block(32);
 dim3 grid(M);

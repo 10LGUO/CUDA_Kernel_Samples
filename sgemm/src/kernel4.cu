@@ -9,9 +9,20 @@ __global__ void sgemm_v4(int M, int N, int K, float alpha, float *A, float *B, f
     int bx = blockIdx.x;
     int by = blockIdx.y;
 
-    int block_row_thread = BN / TN;
-    int block_col_thread = BM / TM;
-    int thread_num = block_row_thread * block_col_thread; // 一个线程负责计算block中TM*TN个元素
+    int block_row_thread = BN / TN;  // threads across one row of the block tile
+    int block_col_thread = BM / TM;  // threads down one col of the block tile
+    // thread_num: threads per block.
+    // Each thread owns a TM×TN sub-tile of the BM×BN output patch.
+    // Total output elements = BM*BN; per-thread work = TM*TN.
+    // Threads needed = BM*BN / (TM*TN) = block_col_thread * block_row_thread.
+    //
+    // Compare with kernel3 (1D thread tile, TN=1): thread_num = BM*BN/TM.
+    // Here TN>1 so fewer threads are needed for the same BM×BN tile.
+    //
+    // Note: thread_num is NOT BM*BK. BK is the K-loop step chosen for shared memory fit,
+    // independent of BN. The thread count is always driven by the output tile and
+    // per-thread work, not by the shared memory tile dimensions.
+    int thread_num = block_row_thread * block_col_thread;
 
     int tx = (threadIdx.x % block_row_thread) * TN;
     int ty = (threadIdx.x / block_row_thread) * TM;
