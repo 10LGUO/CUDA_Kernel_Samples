@@ -144,30 +144,48 @@ void call_reduce_v3(float* d_x, float* d_y, float* h_y, const int N) {
     cudaDeviceSynchronize();
 }
 
-// reduce_v4：使用 warp shuffle
+// reduce_v4: warp shuffle reduction — avoids shared memory for intra-warp reduction
 __global__ void device_reduce_v4(float* d_x, float* d_y, const int N) {
-    __shared__ float s_y[32];  // 仅需要32个，因为一个block最多1024个线程，最多1024/32=32个warp
+    // Shared memory sized for worst case: 1024 threads / 32 (warpSize) = 32 warps max.
+    // Only one float per warp is stored here (the warp's partial sum).
+    __shared__ float s_y[32];
 
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
-    int warpId = threadIdx.x / warpSize;  // 当前线程属于哪个warp
-    int laneId = threadIdx.x % warpSize;  // 当前线程是warp中的第几个线程
+    int warpId = threadIdx.x / warpSize;  // which warp this thread belongs to within the block
+    int laneId = threadIdx.x % warpSize;  // position of this thread within its warp (0-31)
 
-    float val = (idx < N) ? d_x[idx] : 0.0f;  // 搬运d_x[idx]到当前线程的寄存器中
+    // Load one element per thread from HBM into a register. Threads beyond N use 0 (identity for addition).
+    float val = (idx < N) ? d_x[idx] : 0.0f;
+
+    // Phase 1: intra-warp tree reduction using warp shuffles.
+    // __shfl_down_sync(mask, val, offset): each lane receives val from lane+offset.
+    // All 32 lanes execute in lockstep — no __syncthreads() needed within a warp.
+    // After log2(32)=5 rounds, lane 0 holds the sum of all 32 lanes.
+    // #pragma unroll: compile-time loop unrolling — replaces the loop with 5 explicit instructions.
     #pragma unroll
     for (int offset = warpSize >> 1; offset > 0; offset >>= 1) {
-        val += __shfl_down_sync(0xFFFFFFFF, val, offset);   // 在一个warp里折半归约
+        val += __shfl_down_sync(0xFFFFFFFF, val, offset);  // lane i += lane (i + offset)
     }
 
-    if (laneId == 0) s_y[warpId] = val;  // 每个warp里的第一个线程，负责将数据存储到shared mem中
+    // Lane 0 of each warp writes its partial sum to shared memory.
+    // s_y is the bridge between warps — shuffles cannot cross warp boundaries.
+    if (laneId == 0) s_y[warpId] = val;
+
+    // Ensure all warps have written their partial sums before warp 0 reads them.
     __syncthreads();
 
-    if (warpId == 0) {  // 使用每个block中的第一个warp对s_y进行最后的归约
-        int warpNum = blockDim.x / warpSize;  // 每个block中的warp数量
+    // Phase 2: warp 0 reduces the per-warp partial sums stored in s_y.
+    if (warpId == 0) {
+        int warpNum = blockDim.x / warpSize;  // number of warps in this block = entries in s_y
+        // Load one partial sum per lane; lanes beyond warpNum load 0.
         val = (laneId < warpNum) ? s_y[laneId] : 0.0f;
+        // Same warp shuffle reduction as Phase 1 — lane 0 ends up with the block total.
         for (int offset = warpSize >> 1; offset > 0; offset >>= 1) {
             val += __shfl_down_sync(0xFFFFFFFF, val, offset);
         }
-        if (laneId == 0) atomicAdd(d_y, val);  // 使用此warp中的第一个线程，将结果累加到输出
+        // atomicAdd: safely accumulates this block's sum into the global output.
+        // Required because multiple blocks write to the same d_y address concurrently.
+        if (laneId == 0) atomicAdd(d_y, val);
     }
 }
 

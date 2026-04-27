@@ -676,12 +676,15 @@ __global__ void sgemm(float* A, float* B, float* C, int M, int N, int K) {
         }
         __syncthreads();
 
+        // A[0][col + BK]
         A += BK;
+        // B[row + BK][0]
         B += BK * N;
 
         for (int row = 0; row < TM; row++) {
             for (int col = 0; col < TN; col++) {
                 for (int i = 0; i < BK; i++) {
+                    // As[ty+row][i] * Bs[i][tx+col]
                     accum[row][col] += As[(ty + row) * BK + i] * Bs[i * BN + (tx + col)];
                 }
             }
@@ -690,6 +693,7 @@ __global__ void sgemm(float* A, float* B, float* C, int M, int N, int K) {
     }
     for (int row = 0; row < TM; row++) {
         for (int col = 0; col < TN; col++) {
+            // C[ty+row][tx+col] = accum[row][col]
             C[(ty + row) * N + (tx + col)] = accum[row][col];
         }
     }
