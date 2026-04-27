@@ -617,7 +617,7 @@ __global__ void sgemm(float* A, float* B, float* C, int M, int N, int K) {
 
 ```cpp
 dim3 block(256);
-dim3 grid(CEIL(N,128), CEIL(M,128));  // 根据C矩阵的形状(M行N列)切块
+dim3 grid(CEIL(N,128), CEIL(M,128));  // 根据C矩阵的形状(M行N列)切块 // The grid shape is ONLY determined by the output shape.
 sgemm<128, 128, 8, 8, 8><<<grid, block>>>(A,B,C,M,N,K);
 
 template<const int BM,
@@ -730,6 +730,10 @@ __global__ void sgemv(float* A, float* x, float* y, int M, int K) {
     }
 
     for (int offset = warpSize >> 1; offset > 0; offset >>= 1) {
+        // Folding the 'leave' lane into their 'parent' lanes
+        // Each lane reads 'res' from landId + offset lane
+        // No memory involved. Direct register to register transfer.
+        // 0xFFFFFFFF means all 32 lanes are involved.
         res += __shfl_down_sync(0xFFFFFFFF, res, offset);
     }
 
@@ -809,6 +813,7 @@ __global__ void softmax_kernel(float* input, float* output, int M, int N) {
         max_val = (col < N) ? fmaxf(max_val, input[row * N + col]) : max_val;
     }
     for (int offset = warpSize >> 1; offset > 0; offset >>= 1) {
+        // __shfl_xor_sync reads the partner's value before it is overwritten.
         max_val = fmaxf(max_val, __shfl_xor_sync(0xFFFFFFFF, max_val, offset));
     }
 
