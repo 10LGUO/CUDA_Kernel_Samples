@@ -6,6 +6,6 @@ __global__ void hello_from_gpu() {
 
 int main() {
     hello_from_gpu<<<2, 2>>>();
-    cudaDeviceSynchronize();  // 同步
+    cudaDeviceSynchronize();  // synchronize
     return 0;
 }

@@ -13,14 +13,14 @@
 
 // dim3 dimGrid(M);
 // dim3 dimBlock(32);
-// 适合K∈[32,128]使用，小于32或大于128有进一步的优化方法
+// suitable for K∈[32,128]; for K smaller than 32 or larger than 128 there are further optimization methods
 __global__ void sgemv_k32(float* A, float* x, float* y, int M, int K) {
     int laneId = threadIdx.x % warpSize;
     int row = blockIdx.x;  // 0~M-1
     if (row >= M) return;
 
     float res = 0.0f;
-    int kIteration = CEIL(K, warpSize);  // 每个线程需要负责计算的数据个数
+    int kIteration = CEIL(K, warpSize);  // number of elements each thread is responsible for
 
     #pragma unroll
     for(int i = 0; i < kIteration; i++){
@@ -59,12 +59,12 @@ int main() {
     double GFLOPS[2] = {0, 0};
     double GFLOPs = 2.0 * M * 1 * K;
 
-    // 生成A的数据
+    // generate the data for A
     for( int i = 0; i < M * K; i++ ) {
         h_A[i] = (float)i/K;
     }
 
-    // 生成x的数据
+    // generate the data for x
     for( int i = 0; i < K; i++ ) {
         h_x[i] = 1;
     }

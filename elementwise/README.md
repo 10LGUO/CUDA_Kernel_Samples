@@ -1,13 +1,13 @@
 # elementwise
 
-以下算子处理方式类似：
+The following operators are handled in a similar way:
 - add
 - sigmoid
 - relu
 - histogram
 - ...
 
-编译：
+Build:
 ```
 nvcc add.cu -o add
 ```

@@ -11,7 +11,7 @@ __global__ void sgemm_v5(int M, int N, int K, float alpha, float *A, float *B, f
 
     int block_row_thread = BN / TN;
     int block_col_thread = BM / TM;
-    int thread_num = block_row_thread * block_col_thread; // 一个线程负责计算block中TM*TN个元素
+    int thread_num = block_row_thread * block_col_thread; // one thread computes TM*TN elements of the block
 
     int tx = (threadIdx.x % block_row_thread) * TN;
     int ty = (threadIdx.x / block_row_thread) * TM;
@@ -19,17 +19,17 @@ __global__ void sgemm_v5(int M, int N, int K, float alpha, float *A, float *B, f
     __shared__ float As[BM * BK];
     __shared__ float Bs[BK * BN];
 
-    // 移动到当前block
+    // move to the current block
     A = &A[by * BM * K];
     B = &B[bx * BN];
     C = &C[by * BM * N + bx * BN];
 
     /*
-    当前线程负责搬运全局内存中第a_tile_row行，第a_tile_col列元素至共享内存第a_tile_row行，第a_tile_col列
-    a_tile_stride表示block中线程可搬运a_tile_stride行至共享内存；
+    The current thread moves element [a_tile_row][a_tile_col] of global memory into [a_tile_row][a_tile_col] of shared memory.
+    a_tile_stride is the number of rows the block's threads can move into shared memory per round.
 
-    若BM=64,BK=8,thread_num=512,则a_tile_stride=64,a_tile_stride=BM，表示每个线程搬运一轮即可完成所需元素的搬运;
-    若BM=128,BK=8,thread_num=512,则a_tile_stride=64,表示每个线程搬运两轮即可完成所需元素的搬运;
+    If BM=64, BK=8, thread_num=512, then a_tile_stride=64, a_tile_stride=BM, meaning each thread needs one round to move all its elements.
+    If BM=128, BK=8, thread_num=512, then a_tile_stride=64, meaning each thread needs two rounds to move all its elements.
     */
     int a_tile_row = threadIdx.x / BK;
     int a_tile_col = threadIdx.x % BK;
@@ -39,7 +39,7 @@ __global__ void sgemm_v5(int M, int N, int K, float alpha, float *A, float *B, f
     int b_tile_col = threadIdx.x % BN;
     int b_tile_stride = thread_num / BN;
 
-    float tmp[TM][TN] = {0.}; // 每个线程负责TM*TN个元素，则需要申请TM*TN个寄存器保存累加值，额外的一个寄存器用于缓存；
+    float tmp[TM][TN] = {0.}; // each thread handles TM*TN elements, so it needs TM*TN registers to hold the accumulators, plus one extra register for caching
     float a_frag[TM] = {0.};
     float b_frag[TN] = {0.};
 

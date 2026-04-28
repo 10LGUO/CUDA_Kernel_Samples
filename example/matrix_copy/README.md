@@ -1,1 +1,1 @@
-ref：cuda编程基础与实践 (樊哲勇)
+ref: Fundamentals and Practice of CUDA Programming (Fan Zheyong)

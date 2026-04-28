@@ -56,12 +56,12 @@ __global__ void sgemm_v3(int M, int N, int K, float alpha, float *A, float *B, f
     //   C[by*BM][bx*BN] = C[by*BM * N + bx*BN]
     C = &C[by * BM * N + bx * BN];
 
-    // 当前线程负责搬运全局内存矩阵A的中第a_tile_row行，第a_tile_col列元素至共享内存第a_tile_row行，第a_tile_col列
-    // a_tile_stride表示block中线程可搬运a_tile_stride行至共享内存
-    // b_tile_* 同理
+    // The current thread moves element [a_tile_row][a_tile_col] of global memory matrix A into [a_tile_row][a_tile_col] of shared memory.
+    // a_tile_stride is the number of rows the block's threads can move into shared memory per round.
+    // b_tile_* is analogous.
 
-    // 若BM=64, BK=8, thread_num=512, 则a_tile_stride=64, a_tile_stride=BM，表示每个线程搬运 1 轮即可完成所需元素的搬运
-    // 若BM=128, BK=8, thread_num=512, 则a_tile_stride=64, a_tile_stride=BM/2，表示每个线程搬运 2 轮即可完成所需元素的搬运
+    // If BM=64, BK=8, thread_num=512, then a_tile_stride=64, a_tile_stride=BM, meaning each thread needs 1 round to move all its elements.
+    // If BM=128, BK=8, thread_num=512, then a_tile_stride=64, a_tile_stride=BM/2, meaning each thread needs 2 rounds to move all its elements.
     int a_tile_row = threadIdx.x / BK;
     int a_tile_col = threadIdx.x % BK;
     int a_tile_stride = thread_num / BK;
@@ -70,9 +70,9 @@ __global__ void sgemm_v3(int M, int N, int K, float alpha, float *A, float *B, f
     int b_tile_col = threadIdx.x % BN;
     int b_tile_stride = thread_num / BN;
 
-    float tmp[TM + 1] = {0.};  // 每个线程负责TM个元素，则需要申请TM个寄存器保存累加值，额外的一个寄存器用于缓存
+    float tmp[TM + 1] = {0.};  // each thread handles TM elements, so it needs TM registers to hold the accumulators, plus one extra register for caching
 #pragma unroll
-    for (int k = 0; k < K; k += BK) {  // 窗口滑动
+    for (int k = 0; k < K; k += BK) {  // sliding window
 #pragma unroll
         for (int i = 0; i < BM; i += a_tile_stride) {
             As[(a_tile_row + i) * BK + a_tile_col] = A[(a_tile_row + i) * K + a_tile_col];
@@ -82,12 +82,12 @@ __global__ void sgemm_v3(int M, int N, int K, float alpha, float *A, float *B, f
             Bs[(b_tile_row + i) * BN + b_tile_col] = B[(b_tile_row + i) * N + b_tile_col];
         }
         __syncthreads();
-        // 移动A,B指针到下一个矩阵块
+        // move the A, B pointers to the next matrix tile
         A += BK;
         B += BK * N;
 #pragma unroll
         for (int i = 0; i < BK; i++) {
-            tmp[TM] = Bs[tx + i * BN];  // 额外的一个寄存器，避免反复从共享内存中读取Bs[tx + i * BN]
+            tmp[TM] = Bs[tx + i * BN];  // an extra register, to avoid repeatedly reading Bs[tx + i * BN] from shared memory
 #pragma unroll
             for (int j = 0; j < TM; j++) {
                 tmp[j] += As[(ty + j) * BK + i] * tmp[TM];

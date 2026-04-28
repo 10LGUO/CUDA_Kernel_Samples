@@ -37,14 +37,14 @@
     }()
 
 // CUDA
-void _cudaCheck(cudaError_t error, const char *file, int line); //CUDA错误检查
-void CudaDeviceInfo();                                         // 打印CUDA信息
+void _cudaCheck(cudaError_t error, const char *file, int line); // CUDA error check
+void CudaDeviceInfo();                                         // print CUDA info
 
 // matrix
-void randomize_matrix(float *mat, size_t N);         // 随机初始化矩阵
-void copy_matrix(float *src, float *dest, size_t N);    // 复制矩阵
-void print_matrix(const float *A, size_t M, size_t N);     // 打印矩阵
-bool verify_matrix(float *mat1, float *mat2, size_t N); // 验证矩阵
+void randomize_matrix(float *mat, size_t N);         // randomly initialize a matrix
+void copy_matrix(float *src, float *dest, size_t N);    // copy a matrix
+void print_matrix(const float *A, size_t M, size_t N);     // print a matrix
+bool verify_matrix(float *mat1, float *mat2, size_t N); // verify a matrix
 
 // call kernel
 float call_kernel(int kernel_num, bool record, int M, int N, int K, float alpha, float *A, float *B, float beta, float *C);

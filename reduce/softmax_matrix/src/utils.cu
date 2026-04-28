@@ -10,12 +10,12 @@ void _cudaCheck(cudaError_t error, const char *file, int line) {
 
 void randomize_matrix(float *mat, int N) {
     std::random_device rd;  
-    std::mt19937 gen(rd()); // 使用随机设备初始化生成器  
+    std::mt19937 gen(rd()); // initialize the generator with the random device  
 
-    // 创建一个在[-10,10)之间均匀分布的分布对象  
+    // create a uniform distribution over [-10, 10)  
     std::uniform_int_distribution<> dis(-10, 10); 
     for (int i = 0; i < N; i++) {
-        // 生成随机数
+        // generate a random number
         mat[i] = dis(gen);  
     }
 }

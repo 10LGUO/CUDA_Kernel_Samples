@@ -1,8 +1,8 @@
-# 归约计算-max
+# Reduction - max
 
-使用 warp shuffle 进行归约，因为 AtomicMax 不支持 float 类型，需要自己手写实现。
+Reduce using warp shuffle. Because AtomicMax does not support the float type, it needs to be implemented by hand.
 
-## 测试
+## Test
 
 ```log
 [max_cpu]: total_time_h = 0.126157 ms

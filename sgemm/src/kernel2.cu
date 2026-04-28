@@ -16,7 +16,7 @@ __global__ void sgemm_v2(int M, int N, int K, float alpha, float *A, float *B, f
     int tx = threadIdx.x % BN;
     int ty = threadIdx.x / BN;
 
-    // 申请共享内存空间
+    // allocate shared memory
     // NVIDIA GeForce GTX 1050's sharedMemPerBlock is 48KB = 48*1024B = 49152B(0xc000)
     // 1 float takes 4 Bytes, so (BM*BK + BK*BN) should <= 48*1024/4 = 12288
     __shared__ float As[BM * BK];
@@ -42,19 +42,19 @@ __global__ void sgemm_v2(int M, int N, int K, float alpha, float *A, float *B, f
     C = &C[by * BM * N + bx * BN];
 
     float tmp = 0.;
-    for (int k = 0; k < K; k += BK) {  // 窗口滑动
-        // 缓存A_tile和B_tile
+    for (int k = 0; k < K; k += BK) {  // sliding window
+        // cache A_tile and B_tile
         As[ty * BK + tx] = A[ty * K + tx];
         Bs[ty * BN + tx] = B[ty * N + tx];
-        // 同步所有线程缓存完成
-        __syncthreads();  // 同步同一个线程块(block)中的线程，执行到同一个点
-        // 移动A,B指针到下一个矩阵块
+        // synchronize until all threads finish caching
+        __syncthreads();  // sync threads within the same block to the same point
+        // move the A, B pointers to the next matrix tile
         A += BK;
         B += BK * N;
         for (int i = 0; i < BK; i++) {
             tmp += As[ty * BK + i] * Bs[i * BN + tx];
         }
-        // FMA计算需要读取缓存数据，在新一轮写入缓存前进行同步，确保所有线程计算完成
+        // the FMA computation reads the cached data; sync before writing the cache in the next round to ensure all threads finished computing
         __syncthreads();
     }
     C[ty * N + tx] = alpha * tmp + beta * C[ty * N + tx];

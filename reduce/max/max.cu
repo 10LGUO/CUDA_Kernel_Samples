@@ -5,15 +5,15 @@
 #include "utils.cuh"
 
 void max_cpu(float* input, float* output, int N) {
-    *output =  *(std::max_element(input, input + N));  // 计算输入数组的最大值
+    *output =  *(std::max_element(input, input + N));  // compute the maximum of the input array
 }
 
 __device__ static float atomicMax(float* address, float val) {
-    int* address_as_i = (int*)address;  // address转为int指针
-    int old = *address_as_i;  // address中的旧值，用int解码
+    int* address_as_i = (int*)address;  // cast address to an int pointer
+    int old = *address_as_i;  // the old value at address, decoded as an int
     int assumed;
     do {
-        assumed = old;  // assumed存储旧值
+        assumed = old;  // assumed stores the old value
         old = atomicCAS(address_as_i, assumed, __float_as_int(fmaxf(val, __int_as_float(assumed))));
     } while (assumed != old);
     return __int_as_float(old);
@@ -25,7 +25,7 @@ __global__ void max_kernel(float* input, float* output, int N) {
     int warpId = threadIdx.x / warpSize;
     int laneId = threadIdx.x % warpSize;
 
-    // 求M(max)
+    // compute M (max)
     float val = (idx < N) ? input[idx] : (-FLT_MAX);
     for (int offset = warpSize >> 1; offset > 0; offset >>= 1) {
         val = fmaxf(val, __shfl_down_sync(0xFFFFFFFF, val, offset));

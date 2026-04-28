@@ -175,10 +175,10 @@ __global__ void softmax_kernel(float* input, float* output, float* sum, float* m
 }
 
 void softmax(float* input, float* output, int N, float* M, float* sum) {
-    *M = *(std::max_element(input, input + N));  // 计算输入数组的最大值
+    *M = *(std::max_element(input, input + N));  // compute the maximum of the input array
     *sum = 0;
     for (int i = 0; i < N; i++) {
-        output[i] = std::exp(input[i] - *M);  // 每个数先减去最大值，再求exp，避免溢出
+        output[i] = std::exp(input[i] - *M);  // subtract the max from each value before exp, to avoid overflow
         *sum += output[i];
     }
     for (int i = 0; i < N; i++) {
@@ -191,14 +191,14 @@ void call_softmax_v1(float* output, float* input_device, float* output_device, f
     int block_size = BLOCK_SIZE;
     int grid_size  = CEIL(N, BLOCK_SIZE);
 
-    // 1. 初始化
-    cudaCheck(cudaMemset(total_device, 0, sizeof(float)));      // total需要设置为0
+    // 1. initialize
+    cudaCheck(cudaMemset(total_device, 0, sizeof(float)));      // total must be set to 0
     cudaCheck(cudaMemset(total_max_device, 0, sizeof(float)));
-    
-    // 2. 计算和
+
+    // 2. compute the sum
     sum_kernel<<<grid_size, block_size>>>(input_device, total_device, total_max_device, N);
 
-    // 3. 计算softmax (没有减去最大值)
+    // 3. compute softmax (without subtracting the max)
     softmax_kernel<<<grid_size, block_size>>>(input_device, output_device, total_device, total_max_device, N);
 }
 
@@ -207,17 +207,17 @@ void call_softmax_v2(float* output, float* input_device, float* output_device, f
     int block_size = BLOCK_SIZE;
     int grid_size  = CEIL(N, BLOCK_SIZE);
 
-    // 1. 初始化
-    cudaCheck(cudaMemset(total_device, 0, sizeof(float)));  // total需要设置为0
-    setToNegativeMax<<<1,1>>>(total_max_device);            // total_max_device设置为最小FLOAT值
+    // 1. initialize
+    cudaCheck(cudaMemset(total_device, 0, sizeof(float)));  // total must be set to 0
+    setToNegativeMax<<<1,1>>>(total_max_device);            // set total_max_device to the smallest FLOAT value
 
-    // 2. 计算最大值
+    // 2. compute the maximum
     max_kernel<<<grid_size, block_size>>>(input_device, total_max_device, N);
 
-    // 3. 计算和
+    // 3. compute the sum
     sum_kernel<<<grid_size, block_size>>>(input_device, total_device, total_max_device, N);
 
-    // 4. 计算softmax (减去最大值避免溢出)
+    // 4. compute softmax (subtract the max to avoid overflow)
     softmax_kernel<<<grid_size, block_size>>>(input_device, output_device, total_device, total_max_device, N);
 }
 

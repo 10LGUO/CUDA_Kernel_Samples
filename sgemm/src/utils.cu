@@ -51,12 +51,12 @@ void CudaDeviceInfo() {
 
 void randomize_matrix(float *mat, size_t N) {
     std::random_device rd;  
-    std::mt19937 gen(rd()); // 使用随机设备初始化生成器  
+    std::mt19937 gen(rd()); // initialize the generator with the random device
 
-    // 创建一个在[0, 2000)之间均匀分布的分布对象  
-    std::uniform_int_distribution<> dis(0, 2000); 
+    // create a uniform distribution over [0, 2000)
+    std::uniform_int_distribution<> dis(0, 2000);
     for (int i = 0; i < N; i++) {
-        // 生成随机数，限制范围在[-1.0,1.0]
+        // generate a random number, limited to the range [-1.0, 1.0]
         mat[i] = (dis(gen)-1000)/1000.0;  
     }
 }

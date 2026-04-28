@@ -4,16 +4,16 @@
 #include <float.h>
 #include "utils.cuh"
 
-// cpu: 计算每行的softmax
+// cpu: compute the softmax of each row
 void softmax_row(float* input, float* output, int M, int N) {
     for (int row = 0; row < M; row++) {
-        // 第row行
+        // row `row`
         float* input_tmp  = input + row * N;
         float* output_tmp = output + row * N;
-        float max_val = *(std::max_element(input_tmp, input_tmp + N));  // 计算输入数组的最大值
+        float max_val = *(std::max_element(input_tmp, input_tmp + N));  // compute the maximum of the input array
         float sum = 0;
         for (int i = 0; i < N; i++) {
-            output_tmp[i] = std::exp(input_tmp[i] - max_val);  // 每个数先减去最大值，再求exp，避免溢出
+            output_tmp[i] = std::exp(input_tmp[i] - max_val);  // subtract the max from each value before exp, to avoid overflow
             sum += output_tmp[i];
         }
         for (int i = 0; i < N; i++) {
@@ -22,14 +22,14 @@ void softmax_row(float* input, float* output, int M, int N) {
     }
 }
 
-// cpu: 计算每列的softmax
+// cpu: compute the softmax of each column
 void softmax_col(float* x, float* y, int M, int N) {
     for (int col = 0; col < N; col++) {
-        // 偏移到当前列
+        // offset to the current column
         float* x_col = x + col;
         float* y_col = y + col;
 
-        // 计算当前列的最大值、和
+        // compute the max and sum of the current column
         float max_val = -FLT_MAX;
         for (int i = 0; i < M; i++) {
             max_val = max(x_col[i*N], max_val);
@@ -44,18 +44,18 @@ void softmax_col(float* x, float* y, int M, int N) {
     }
 }
 
-// gpu: 计算每行的softmax
+// gpu: compute the softmax of each row
 __global__ void softmax_row_kernel(float* input, float* output, int M, int N) {
     __shared__ float s_max_val;
     __shared__ float s_sum;
     int laneId = threadIdx.x % warpSize;
-    // 当前行
+    // current row
     int row = blockIdx.x;
     if (row >= M) return;
 
-    int iteration = CEIL(N, warpSize);  // 每个线程负责计算的数据个数
+    int iteration = CEIL(N, warpSize);  // number of elements each thread is responsible for
 
-    // 求每一行最大值
+    // find the max of each row
     float max_val = -FLT_MAX;
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
@@ -66,9 +66,9 @@ __global__ void softmax_row_kernel(float* input, float* output, int M, int N) {
     for (int offset = warpSize >> 1; offset > 0; offset >>= 1) {
         max_val = fmaxf(max_val, __shfl_down_sync(0xFFFFFFFF, max_val, offset));
     }
-    if (laneId == 0) s_max_val = max_val;  // 最大值汇总到第一个线程，第一个线程将它搬运到s_mem
+    if (laneId == 0) s_max_val = max_val;  // the max is aggregated into the first thread, which moves it into s_mem
 
-    // 求每一行的和，且要减去最大值
+    // compute the sum of each row, subtracting the max
     float sum = 0.0f;
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
@@ -79,9 +79,9 @@ __global__ void softmax_row_kernel(float* input, float* output, int M, int N) {
     for (int offset = warpSize >> 1; offset > 0; offset >>= 1) {
         sum += __shfl_down_sync(0xFFFFFFFF, sum, offset);
     }
-    if (laneId == 0) s_sum = sum;  // sum值汇总到第一个线程，第一个线程将它搬运到s_mem
+    if (laneId == 0) s_sum = sum;  // the sum is aggregated into the first thread, which moves it into s_mem
 
-    // 计算每一行的softmax
+    // compute the softmax of each row
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
         int col = i * warpSize + laneId;
@@ -89,17 +89,17 @@ __global__ void softmax_row_kernel(float* input, float* output, int M, int N) {
     }
 }
 
-// gpu: 计算每行的softmax, 改用 __shfl_xor_sync 后, 每个线程的
-// 寄存器的 max_val 和 sum 都是最终的结果，就不用写到共享内存再读取了
+// gpu: compute the softmax of each row. After switching to __shfl_xor_sync, each thread's
+// registers hold the final max_val and sum, so there is no need to write to shared memory and read it back
 __global__ void softmax_row_kernel2(float* input, float* output, int M, int N) {
     int laneId = threadIdx.x % warpSize;
-    // 当前行
+    // current row
     int row = blockIdx.x;
     if (row >= M) return;
 
-    int iteration = CEIL(N, warpSize);  // 每个线程负责计算的数据个数
+    int iteration = CEIL(N, warpSize);  // number of elements each thread is responsible for
 
-    // 求每一行最大值
+    // find the max of each row
     float max_val = -FLT_MAX;
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
@@ -111,7 +111,7 @@ __global__ void softmax_row_kernel2(float* input, float* output, int M, int N) {
         max_val = fmaxf(max_val, __shfl_xor_sync(0xFFFFFFFF, max_val, offset));
     }
 
-    // 求每一行的和，且要减去最大值
+    // compute the sum of each row, subtracting the max
     float sum = 0.0f;
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
@@ -123,7 +123,7 @@ __global__ void softmax_row_kernel2(float* input, float* output, int M, int N) {
         sum += __shfl_xor_sync(0xFFFFFFFF, sum, offset);
     }
 
-    // 计算每一行的softmax
+    // compute the softmax of each row
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
         int col = i * warpSize + laneId;
@@ -131,18 +131,18 @@ __global__ void softmax_row_kernel2(float* input, float* output, int M, int N) {
     }
 }
 
-// gpu: 计算每列的softmax
+// gpu: compute the softmax of each column
 __global__ void softmax_col_kernel(float* input, float* output, int M, int N) {
     __shared__ float s_max_val;
     __shared__ float s_sum;
     int laneId = threadIdx.x % warpSize;
-    // 当前列
+    // current column
     int col = blockIdx.x;
     if (col >= N) return;
 
-    int iteration = CEIL(M, warpSize);  // 每个线程负责计算的数据个数
+    int iteration = CEIL(M, warpSize);  // number of elements each thread is responsible for
 
-    // 求每一列最大值
+    // find the max of each column
     float max_val = -FLT_MAX;
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
@@ -153,9 +153,9 @@ __global__ void softmax_col_kernel(float* input, float* output, int M, int N) {
     for (int offset = warpSize >> 1; offset > 0; offset >>= 1) {
         max_val = fmaxf(max_val, __shfl_down_sync(0xFFFFFFFF, max_val, offset));
     }
-    if (laneId == 0) s_max_val = max_val;  // 最大值汇总到第一个线程，第一个线程将它搬运到s_mem
+    if (laneId == 0) s_max_val = max_val;  // the max is aggregated into the first thread, which moves it into s_mem
 
-    // 求每一列的和，且要减去最大值
+    // compute the sum of each column, subtracting the max
     float sum = 0.0f;
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
@@ -166,9 +166,9 @@ __global__ void softmax_col_kernel(float* input, float* output, int M, int N) {
     for (int offset = warpSize >> 1; offset > 0; offset >>= 1) {
         sum += __shfl_down_sync(0xFFFFFFFF, sum, offset);
     }
-    if (laneId == 0) s_sum = sum;  // sum值汇总到第一个线程，第一个线程将它搬运到s_mem
+    if (laneId == 0) s_sum = sum;  // the sum is aggregated into the first thread, which moves it into s_mem
 
-    // 计算每一列的softmax
+    // compute the softmax of each column
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
         int row = i * warpSize + laneId;
@@ -176,17 +176,17 @@ __global__ void softmax_col_kernel(float* input, float* output, int M, int N) {
     }
 }
 
-// gpu: 计算每列的softmax, 改用 __shfl_xor_sync 后，每个线程的
-// 寄存器的 max_val 和 sum 都是最终的结果，就不用写到共享内存再读取了
+// gpu: compute the softmax of each column. After switching to __shfl_xor_sync, each thread's
+// registers hold the final max_val and sum, so there is no need to write to shared memory and read it back
 __global__ void softmax_col_kernel2(float* input, float* output, int M, int N) {
     int laneId = threadIdx.x % warpSize;
-    // 当前列
+    // current column
     int col = blockIdx.x;
     if (col >= N) return;
 
-    int iteration = CEIL(M, warpSize);  // 每个线程负责计算的数据个数
+    int iteration = CEIL(M, warpSize);  // number of elements each thread is responsible for
 
-    // 求每一列最大值
+    // find the max of each column
     float max_val = -FLT_MAX;
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
@@ -198,7 +198,7 @@ __global__ void softmax_col_kernel2(float* input, float* output, int M, int N) {
         max_val = fmaxf(max_val, __shfl_xor_sync(0xFFFFFFFF, max_val, offset));
     }
 
-    // 求每一列的和，且要减去最大值
+    // compute the sum of each column, subtracting the max
     float sum = 0.0f;
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
@@ -210,7 +210,7 @@ __global__ void softmax_col_kernel2(float* input, float* output, int M, int N) {
         sum += __shfl_xor_sync(0xFFFFFFFF, sum, offset);
     }
 
-    // 计算每一列的softmax
+    // compute the softmax of each column
     #pragma unroll
     for (int i = 0; i < iteration; i++) {
         int row = i * warpSize + laneId;
@@ -224,14 +224,14 @@ int main() {
     const int N = 64;
     const int repeat_times = 10;
 
-    float* input      = (float*)malloc(M * N * sizeof(float));  // 输入是M*N的矩阵
-    float* output     = (float*)malloc(M * N * sizeof(float));  // 输出是M*N的矩阵
-    float* output_ref = (float*)malloc(M * N * sizeof(float));  // 输出是M*N的矩阵(cpu)
+    float* input      = (float*)malloc(M * N * sizeof(float));  // input is an M*N matrix
+    float* output     = (float*)malloc(M * N * sizeof(float));  // output is an M*N matrix
+    float* output_ref = (float*)malloc(M * N * sizeof(float));  // output is an M*N matrix (cpu)
 
-    // 初始化输入
+    // initialize the input
     randomize_matrix(input, M*N);
 
-    // cpu, 计算一行的softmax
+    // cpu, compute the softmax of one row
     float total_time_h = TIME_RECORD(repeat_times, ([&]{softmax_row(input, output_ref, M, N);}));
     printf("[softmax_row_cpu]: total_time_h = %f ms\n", total_time_h / repeat_times);
 
@@ -241,17 +241,17 @@ int main() {
     cudaCheck(cudaMalloc(&output_device, M * N * sizeof(float)));
     cudaCheck(cudaMemcpy(input_device, input, M * N * sizeof(float), cudaMemcpyHostToDevice));
 
-    // gpu, 计算一行的softmax
+    // gpu, compute the softmax of one row
     float total_time_d = TIME_RECORD(repeat_times, ([&]{softmax_row_kernel2<<<M, 32>>>(input_device, output_device, M, N);}));
     printf("[softmax_row_gpu]: total_time_d = %f ms\n", total_time_d / repeat_times);
     cudaCheck(cudaMemcpy(output, output_device, M * N * sizeof(float), cudaMemcpyDeviceToHost));
     verify_matrix(output, output_ref, M*N);
 
-    // cpu, 计算一列的softmax
+    // cpu, compute the softmax of one column
     float total_time_h2 = TIME_RECORD(repeat_times, ([&]{softmax_col(input, output_ref, M, N);}));
     printf("[softmax_col_cpu]: total_time_h = %f ms\n", total_time_h2 / repeat_times);
 
-    // gpu, 计算一列行的softmax
+    // gpu, compute the softmax of one column
     float total_time_d2 = TIME_RECORD(repeat_times, ([&]{softmax_col_kernel2<<<N, 32>>>(input_device, output_device, M, N);}));
     printf("[softmax_col_gpu]: total_time_d = %f ms\n", total_time_d2 / repeat_times);
     cudaCheck(cudaMemcpy(output, output_device, M * N * sizeof(float), cudaMemcpyDeviceToHost));

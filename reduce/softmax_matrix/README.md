@@ -1,13 +1,13 @@
-# 归约计算-矩阵Softmax
-内容：对MxN的**矩阵的每一行**求softmax
+# Reduction - Matrix Softmax
+Content: compute the softmax of **each row** of an MxN matrix.
 
-参考[sgemv](../../gemv/sgemv_k32.cu)，用一个warp负责一行(列)的计算。
+Following [sgemv](../../gemv/sgemv_k32.cu), use one warp to handle the computation of one row (column).
 
-注意，如果使用 `__shfl_down_sync`，warp归约计算最后的结果将汇总到第一个线程中，第一个线程要把这个数据搬运到s_mem，以供同一个warp中的其他线程使用。
+Note that if you use `__shfl_down_sync`, the final result of the warp reduction is aggregated into the first thread, which must move this data into s_mem for the other threads in the same warp to use.
 
-可以使用 `__shfl_xor_sync`，这样每个线程的寄存器的 max_val 和 sum 都是最终的结果，就不用写到共享内存再读取了。
+You can use `__shfl_xor_sync` instead, so that each thread's registers hold the final max_val and sum, and there is no need to write to shared memory and read it back.
 
-测试，M = 2048，N = 64：
+Test, M = 2048, N = 64:
 ```
 [softmax_row_cpu]: total_time_h = 2.601370 ms
 [softmax_row_gpu]: total_time_d = 0.061936 ms
