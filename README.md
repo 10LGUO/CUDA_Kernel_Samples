@@ -836,3 +836,69 @@ __global__ void softmax_kernel(float* input, float* output, int M, int N) {
 ```
 
 进一步地，**当行数 M = 1，问题退化为对一个长度为 N 的数组进行归约求和**。可以自行编写。
+```cpp
+// Solution 1
+dim3 block(32);
+dim3 grid(1);
+__global__ void reduce_sum(float* input, float* output, int N) {
+    // use warpSize here because:
+    // laneId is internal to a warp
+    // But threadIdx.x is internal to the block, so we have a mismatch here.
+    // To resolve the mismatch, we simply use 1-d block of size warpSize
+    int laneId = threadIdx.x % warpSize;
+    // warpSize is a constant
+    int iterations = CEIL(N, warpSize);
+    float sum = 0.0f
+    for (int i = 0; i < iterations; i++) {
+        int col = i * warpSize + laneId;
+        sum += col < N ? input[col]; 0.0f;
+    }
+    for (int offset = warpSize >> 1; offset > 0; offset >>=1) {
+        sum += __shfl_xor_sync(0xFFFFFFFF, sum, offset);
+    }
+    if (laneId == 0) {
+        *output = sum;
+    }
+}
+
+// Solution 2
+dim3 block(32);
+dim3 grid(CEIL(N,32));
+__global__ void reduce_sum(float* input, float* output, int N) {
+    int laneId = threadIdx.x % warpSize;
+    __shared__ float shared_sum = 0.0f
+    // warpSize is a constant
+
+    // int iterations = CEIL(N, warpSize*grid_size); // wrong: grid_size is not built in.
+    int iterations = CEIL(N, warpSize*gridDim.x);
+    float sum = 0.0f
+    for (int i = 0; i < iterations; i++) {
+        int col = blockIdx.x * blockDim.x + i * warpSize + laneId;
+        sum += input[col];
+    }
+    for (int offset = warpSize >> 1; offset > 0; offset >>=1) {
+        sum += __shfl_xor_sync(0xFFFFFFFF, sum, offset);
+    }
+    if (laneId == 0) {
+        shared_sum += sum;
+    }
+    __syncthreads();
+    if (blockIdx.x == 0) *output = shared_sum;
+    // At this point we only have partial sum within each block. Because there is no inter-block communication
+    // yet.
+    // Option 1;
+    atomicAdd(output, sum);
+    // drawback: create contention from serializing results of each blocks.
+    // Option 2:
+    // launch a second kernel to reduce the partial sum.
+    // float* partial;
+    // NOTE: here we use HBM to achieve inter block communication.
+    // cudaMalloc(&partial, grid_size * sizeof(float));  // one float per block
+    // // stage 1: each block writes its partial sum to partial[blockIdx.x]
+    // reduce_stage1<<<grid_size, block_size>>>(input, partial, N);
+    // // stage 2: one block reduces all partial sums into final output
+    // reduce_stage2<<<1, block_size>>>(partial, output, grid_size);
+    // cudaFree(partial);
+
+}
+```
