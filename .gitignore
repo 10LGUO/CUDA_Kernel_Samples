@@ -3,3 +3,8 @@
 
 # cmake
 *build*/
+
+# python / pytest
+__pycache__/
+*.pyc
+*.so
